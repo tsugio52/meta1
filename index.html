@@ -543,7 +543,9 @@
       scene.fog = new THREE.FogExp2(0x08090d, 0.04);
 
       camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
-      updateCameraPositionImmediate();
+      baseCameraPos.copy(cameraConfigs[cameraMode].pos);
+      camera.position.copy(baseCameraPos);
+      camera.lookAt(cameraConfigs[cameraMode].target);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
       renderer.setSize(w, h);
@@ -1019,6 +1021,8 @@
       }
     }
 
+    let lastTimestamp = performance.now();
+
     function animateFrame() {
       const now = performance.now();
       const dt = (now - lastTimestamp) / 1000;
@@ -1065,6 +1069,52 @@
     }
 
     window.onload = function() {
+      // CDNからのVRButton読み込みがブロック・失敗した場合のフォールバック（自前でボタン生成）
+      if (typeof VRButton === 'undefined') {
+        window.VRButton = {
+          createButton: function(renderer) {
+            const btn = document.createElement('button');
+            btn.style.position = 'absolute';
+            btn.style.bottom = '20px';
+            btn.style.left = 'calc(50% - 75px)';
+            btn.style.width = '150px';
+            btn.style.padding = '12px 6px';
+            btn.style.border = '1px solid rgba(255, 255, 255, 0.5)';
+            btn.style.borderRadius = '8px';
+            btn.style.background = 'rgba(0, 0, 0, 0.6)';
+            btn.style.color = '#fff';
+            btn.style.font = 'bold 14px sans-serif';
+            btn.style.textAlign = 'center';
+            btn.style.cursor = 'pointer';
+            btn.style.zIndex = '999';
+            
+            if ('xr' in navigator) {
+              navigator.xr.isSessionSupported('immersive-vr').then(function(supported) {
+                if (supported) {
+                  btn.textContent = 'ENTER VR';
+                  btn.onclick = function() {
+                    if (renderer.xr.isPresenting) {
+                      renderer.xr.getSession().end();
+                    } else {
+                      navigator.xr.requestSession('immersive-vr').then(function(session) {
+                        renderer.xr.setSession(session);
+                      });
+                    }
+                  };
+                } else {
+                  btn.textContent = 'VR NOT SUPPORTED';
+                  btn.style.opacity = '0.5';
+                }
+              });
+            } else {
+              btn.textContent = 'WEBXR NOT AVAILABLE';
+              btn.style.opacity = '0.5';
+            }
+            return btn;
+          }
+        };
+      }
+
       initScene();
       renderer.setAnimationLoop(animateFrame);
     };
