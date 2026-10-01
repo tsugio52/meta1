@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Pottery Smash VR: True Immersive</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Three.js & VRButton -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -13,29 +12,23 @@
     body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; user-select: none; background-color: #040508; font-family: 'Inter', system-ui, sans-serif; }
     #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; }
     .glass-card { background: rgba(14, 18, 27, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6); }
-    .glass-btn { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); transition: all 0.15s; }
-    .glass-btn:hover { background: rgba(255, 255, 255, 0.22); transform: scale(1.05); }
-    .glass-btn:active { transform: scale(0.95); }
     #vr-overlay-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; opacity: 0; transition: opacity 0.5s; z-index: 50; text-align: center; }
-    .active-type { background: linear-gradient(135deg, #f97316, #d97706); border-color: rgba(255,255,255,0.4); box-shadow: 0 0 15px rgba(249, 115, 22, 0.5); }
   </style>
 </head>
 <body class="relative w-full h-full text-slate-100">
   <div id="canvas-container"></div>
 
-  <!-- 2D UI (VRに入ると見えなくなるため、VR前用のメニュー) -->
   <div id="ui-layer" class="absolute inset-0 pointer-events-none z-20 transition-opacity duration-300">
     <div class="absolute top-4 left-1/2 -translate-x-1/2 glass-card px-6 py-2 rounded-full flex items-center space-x-3 pointer-events-auto">
       <div class="w-6 h-6 rounded-md bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white text-sm"><i class="fa-solid fa-vr-cardboard"></i></div>
       <span class="text-sm font-black tracking-widest text-white">TRUE IMMERSIVE VR</span>
     </div>
 
-    <!-- 👇 外部スクリプトに依存しない、絶対に見える超大型カスタムVRボタン -->
+    <!-- 超大型カスタムVRボタン (HTTPS非対応時は警告を表示) -->
     <button id="custom-vr-btn" class="absolute bottom-[220px] left-1/2 -translate-x-1/2 px-10 py-5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-full shadow-[0_0_40px_rgba(249,115,22,0.8)] pointer-events-auto transform transition-all active:scale-95 text-3xl flex items-center gap-4 border-2 border-white/40 z-50">
       <i class="fa-solid fa-vr-cardboard text-4xl"></i> ENTER VR
     </button>
 
-    <!-- 画面下のENTER VRボタン横に表示する説明 -->
     <div class="absolute bottom-10 left-1/2 -translate-x-1/2 glass-card px-6 py-4 rounded-2xl flex flex-col items-center pointer-events-auto max-w-sm w-full">
       <h3 class="text-amber-400 font-bold mb-2 text-sm"><i class="fa-solid fa-hands"></i> 没入型VR操作ガイド</h3>
       <ul class="text-xs text-slate-300 space-y-1.5 w-full">
@@ -43,13 +36,7 @@
         <li><span class="inline-block w-6 text-center text-white bg-white/10 rounded mr-1">✊</span> <b>右手中指グリップ:</b> 鉢の種類チェンジ</li>
         <li><span class="inline-block w-6 text-center text-white bg-white/10 rounded mr-1">✊</span> <b>左手中指グリップ:</b> 部屋の清掃＆タワー再建</li>
       </ul>
-      <p class="text-[10px] text-slate-400 mt-3 text-center">画面下の「ENTER VR」を押すと没入モードに入ります。</p>
     </div>
-  </div>
-
-  <div id="vr-overlay-msg">
-    <h1 class="text-4xl font-black text-amber-400 drop-shadow-lg mb-2">VR MODE ACTIVE</h1>
-    <p class="text-lg font-bold text-white drop-shadow-md">周りに気をつけて、腕を振って投球してください。</p>
   </div>
 
   <script>
@@ -61,20 +48,19 @@
     let xrControllers = [], xrCameraSpace;
     let audioEnabled = true, audioCtx = null, activePotType = 'terracotta';
 
-    // 完全な現実スケール (1 unit = 1 meter)
+    // 距離とスケールの調整 (ハンドトラッキングでも届きやすい位置へ)
     const ARENA = { 
-      wallZ: -8.0,      // 8メートル先の壁
-      floorY: 0,        // 床は完全に Y = 0 (現実と同じ)
-      sideX: 6.0,       // 部屋の横幅 (±6m)
-      ceilY: 6.0,       // 天井の高さ (6m)
-      readyPos: new THREE.Vector3(0, 0.85, -1.1) // 💡 ハンドトラッキングでも認識しやすいように少し下＆さらに奥へ
+      wallZ: -8.0,      
+      floorY: 0,        
+      sideX: 6.0,       
+      ceilY: 6.0,       
+      readyPos: new THREE.Vector3(0, 0.85, -1.1) // 💡 適切な距離・高さに調整
     };
     
-    const GRAVITY = -9.8; // 現実の重力加速度
-    const POT_SCALE = 0.35; // 鉢の現実的なサイズ(約30cm〜35cm)
-    const CRATE_SIZE = 0.4; // タワーの木箱のサイズ(40cm)
+    const GRAVITY = -9.8; 
+    const POT_SCALE = 0.35; 
+    const CRATE_SIZE = 0.4;
 
-    // 音響関数（短縮版）
     function getAudioContext() { if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; audioCtx = new AC(); } if (audioCtx.state === 'suspended') audioCtx.resume(); return audioCtx; }
     function playSound(type, intensity = 1.0) {
       if (!audioEnabled) return; const ctx = getAudioContext(); if (!ctx) return; const now = ctx.currentTime;
@@ -90,22 +76,19 @@
       }
     }
 
-    // 💡 没入感の鍵：ハプティクス（触覚）フィードバック関数
     function triggerHaptics(controller, intensity = 1.0, durationMs = 100) {
       if (!controller.userData.inputSource) return;
       const gamepad = controller.userData.inputSource.gamepad;
       if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators.length > 0) {
-        // VRコントローラーのモーターを振動させる
         gamepad.hapticActuators[0].pulse(intensity, durationMs);
       }
     }
 
-    // 軽量プロシージャルテクスチャ
     function createCanvas(w, h, fn) { const c = document.createElement('canvas'); c.width = w; c.height = h; fn(c.getContext('2d'), w, h); return c; }
     function texWall() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#1e2126'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#2a2d34'; ctx.fillRect(0,0,w,h/2); ctx.fillRect(0,h/2,w/2,h/2); ctx.fillRect(w/2,h/2,w/2,h/2); })); }
     function texFloor() { const t = new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#0f1115'; ctx.fillRect(0,0,w,h); for(let i=0;i<2000;i++){ ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(Math.random()*w,Math.random()*h,2,2); } })); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(10,10); return t; }
     
-    // 💡 リアルなプロシージャルテクスチャ群を復活
+    // 💡 色の赤みを抜き、自然な素焼き（テラコッタ）色に変更
     function texClay() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#a86a45'; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h), d=img.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*25; d[i]=Math.min(255,Math.max(0,d[i]+n)); d[i+1]=Math.min(255,Math.max(0,d[i+1]+n*0.7)); d[i+2]=Math.min(255,Math.max(0,d[i+2]+n*0.4)); } ctx.putImageData(img,0,0); })); }
     function texSoil() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#1d120d'; ctx.fillRect(0,0,w,h); for(let i=0;i<1500;i++){ ctx.fillStyle=Math.random()>0.4?'rgba(65,42,28,0.75)':'rgba(8,6,4,0.9)'; ctx.beginPath(); ctx.arc(Math.random()*w,Math.random()*h,Math.random()*2+0.5,0,Math.PI*2); ctx.fill(); } })); }
     function texMagma() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#181210'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='#ff4400'; ctx.lineWidth=8; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12; for(let i=0;i<12;i++){ ctx.beginPath(); let tx=Math.random()*w, ty=Math.random()*h; ctx.moveTo(tx,ty); for(let s=0;s<6;s++){ tx+=(Math.random()-0.5)*80; ty+=(Math.random()-0.5)*80; ctx.lineTo(tx,ty); } ctx.stroke(); } })); }
@@ -114,7 +97,7 @@
     function initScene() {
       const container = document.getElementById('canvas-container');
       scene = new THREE.Scene(); 
-      scene.background = new THREE.Color(0x0a0c12); // 真っ暗ではなく深い夜色
+      scene.background = new THREE.Color(0x0a0c12); 
       scene.fog = new THREE.FogExp2(0x0a0c12, 0.04);
 
       camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
@@ -126,17 +109,14 @@
       renderer.shadowMap.enabled = true; 
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       
-      // VR有効化
       renderer.xr.enabled = true;
       setupCustomVRButton();
 
-      // 💡 VRカメラ空間: 原点に設定することで、現実の身長と床(Y=0)が完全一致する
       xrCameraSpace = new THREE.Group();
       xrCameraSpace.position.set(0, 0, 0); 
       scene.add(xrCameraSpace);
       xrCameraSpace.add(camera);
 
-      // 非VR用初期位置（座りプレイ想定の高さ）
       if(!renderer.xr.isPresenting) camera.position.set(0, 1.4, 2.0);
 
       container.appendChild(renderer.domElement);
@@ -154,11 +134,10 @@
       });
       renderer.xr.addEventListener('sessionend', () => {
         document.getElementById('ui-layer').style.opacity = '1';
-        camera.position.set(0, 1.4, 2.0); // VR終了時にカメラ位置を復帰
+        camera.position.set(0, 1.4, 2.0);
       });
     }
 
-    // 💡 外部スクリプトに頼らず、自前で確実にVRセッションを起動・エラー判定する処理
     function setupCustomVRButton() {
       const vrBtn = document.getElementById('custom-vr-btn');
       if ('xr' in navigator) {
@@ -180,7 +159,6 @@
           }
         });
       } else {
-        // HTTPSでない場合、navigator.xr自体が存在しないためここに来る
         vrBtn.innerHTML = '<span class="text-lg">HTTPS(暗号化)接続が必要です</span>';
         vrBtn.classList.replace('from-orange-500', 'from-rose-700');
         vrBtn.classList.replace('to-amber-500', 'to-rose-600');
@@ -190,14 +168,12 @@
     }
 
     function setupImmersiveEnvironment() {
-      // 巨大なアリーナ空間（サイバーギャラリー風）
       const roomGeo = new THREE.BoxGeometry(ARENA.sideX * 2, ARENA.ceilY, Math.abs(ARENA.wallZ) + 4);
       const roomMat = new THREE.MeshStandardMaterial({ color: 0x1a1e28, roughness: 0.9, side: THREE.BackSide });
       const room = new THREE.Mesh(roomGeo, roomMat);
       room.position.set(0, ARENA.ceilY/2, ARENA.wallZ/2 + 2);
       scene.add(room);
 
-      // 反射を少し持たせた滑らかな床
       const floorMat = new THREE.MeshStandardMaterial({ map: texFloor(), roughness: 0.2, metalness: 0.1 });
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), floorMat);
       floor.rotation.x = -Math.PI / 2;
@@ -205,19 +181,15 @@
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // 目の前の台座 (手を伸ばせば届く位置)
       const pedH = ARENA.readyPos.y;
       const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, pedH, 16), new THREE.MeshStandardMaterial({ color: 0x222530, roughness: 0.6 }));
       pedestal.position.set(ARENA.readyPos.x, ARENA.floorY + pedH/2, ARENA.readyPos.z);
       pedestal.castShadow = true; pedestal.receiveShadow = true;
       scene.add(pedestal);
 
-      // 💡 空間の奥行きを演出するアンビエントダスト（漂う光の粒）
       const dustGeo = new THREE.BufferGeometry();
       const pos = new Float32Array(600 * 3);
-      for(let i=0; i<600*3; i+=3) {
-        pos[i] = (Math.random()-0.5)*12; pos[i+1] = Math.random()*5; pos[i+2] = (Math.random()-0.5)*12;
-      }
+      for(let i=0; i<600*3; i+=3) { pos[i] = (Math.random()-0.5)*12; pos[i+1] = Math.random()*5; pos[i+2] = (Math.random()-0.5)*12; }
       dustGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       ambientParticles = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0x88bbff, size: 0.03, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending }));
       scene.add(ambientParticles);
@@ -237,7 +209,6 @@
         const controller = renderer.xr.getController(i);
         xrCameraSpace.add(controller);
         
-        // 💡 没入感を高めるSFメカニカルハンドのデザイン
         const handGroup = new THREE.Group();
         const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.1), new THREE.MeshStandardMaterial({color: 0x222222, metalness: 0.8, roughness: 0.2}));
         const core = new THREE.Mesh(new THREE.SphereGeometry(0.025, 16, 16), new THREE.MeshStandardMaterial({color: i===0?0xff3333:0x3388ff, emissive: i===0?0xff3333:0x3388ff, emissiveIntensity: 0.8}));
@@ -248,19 +219,17 @@
         controller.userData.velocity = new THREE.Vector3(); 
         controller.userData.prevPositions = [];
 
-        // Haptic（振動）用に InputSource を保存
         controller.addEventListener('connected', function(e) { this.userData.inputSource = e.data; });
 
-        // トリガー操作：掴む ＆ 投げる
         controller.addEventListener('selectstart', (e) => {
           const ctrl = e.target;
           if (readyPot && !readyPot.isGrabbed) {
             const ctrlPos = new THREE.Vector3(); ctrl.getWorldPosition(ctrlPos);
             const potPos = new THREE.Vector3(); readyPot.mesh.getWorldPosition(potPos);
-            if (ctrlPos.distanceTo(potPos) < 0.4) { // 現実的なリーチ判定
+            if (ctrlPos.distanceTo(potPos) < 0.4) {
               readyPot.isGrabbed = true; ctrl.userData.grabbedPot = readyPot;
               ctrl.attach(readyPot.mesh);
-              triggerHaptics(ctrl, 0.5, 30); // 💡 掴んだ感触を振動でフィードバック
+              triggerHaptics(ctrl, 0.5, 30);
             }
           }
         });
@@ -271,29 +240,29 @@
             const pot = ctrl.userData.grabbedPot; pot.isGrabbed = false; ctrl.userData.grabbedPot = null;
             scene.attach(pot.mesh);
             
-            // 手の振りの速度を増幅して投擲（重力が9.8なので自然な弧を描く）
             const vel = ctrl.userData.velocity.clone().multiplyScalar(2.0); 
-            if (vel.lengthSq() < 0.5) vel.set(0, 0, 0); // ぽろっと落とす
+            if (vel.lengthSq() < 0.5) vel.set(0, 0, 0); 
             
-            // 💡 鉢本体・土・葉っぱのすべてのマテリアルを一緒に投げる
+            // 💡 クラッシュ防止: 必要なすべてのマテリアルプロパティを渡す
             flyingPots.push({ mesh: pot.mesh, bodyMat: pot.bodyMat, soilMat: pot.soilMat, leafMat: pot.leafMat, type: pot.type, vel: vel, angVel: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15, (Math.random()-0.5)*15) });
             readyPot = null;
             
-            triggerHaptics(ctrl, Math.min(vel.length()/15, 1.0), 60); // 💡 投げた勢いに応じた振動
+            triggerHaptics(ctrl, Math.min(vel.length()/15, 1.0), 60);
             playSound('whoosh', vel.length()/10);
             setTimeout(spawnReadyPot, 600);
           }
         });
 
-        // グリップボタン操作：武器チェンジ＆リセット
+        // 💡 致命的バグ修正: イベント引数から ctrl を取得
         controller.addEventListener('squeezestart', (e) => {
-          if (i === 1) { // 右手: 種類変更
+          const ctrl = e.target; 
+          if (i === 1) { 
             const types = ['terracotta', 'dynamite', 'crystal'];
             activePotType = types[(types.indexOf(activePotType)+1)%types.length];
             if(readyPot) { scene.remove(readyPot.mesh); readyPot = null; }
             spawnReadyPot();
             triggerHaptics(ctrl, 0.3, 20);
-          } else { // 左手: 清掃＆リセット
+          } else { 
             clearRoom();
             triggerHaptics(ctrl, 0.8, 150);
           }
@@ -314,20 +283,18 @@
       });
     }
 
-    // 💡 植木鉢のモデル生成をリアルな植物＆土付きのハイポリゴンにアップグレード
     function buildPotModel(type) {
       const group = new THREE.Group();
-      // デフォルトの色を白にして、テクスチャ本来の色（自然な素焼き色）をそのまま活かす
-      let color = 0xffffff, emissive = 0x000000, roughness = 0.9, metalness = 0.02, map = null, transparent = false, opacity = 1.0;
+      let color = 0xffffff, emissive = 0x000000, roughness = 0.9, metalness = 0.02, map = null, transparent = false, opacity = 1.0, emissiveInt = 1.0;
       
       if(type === 'dynamite') { color = 0xd91e18; emissive = 0x550505; roughness = 0.35; metalness = 0.2; }
       else if(type === 'crystal') { color = 0x88e7ff; roughness = 0.06; metalness = 0.1; transparent = true; opacity = 0.82; }
-      else if(type === 'magma') { map = texMagma(); roughness = 0.7; emissive = 0xff3300; emissiveIntensity = 0.55; }
-      else { map = texClay(); }
+      else if(type === 'magma') { map = texMagma(); roughness = 0.7; emissive = 0xff3300; emissiveInt = 0.55; }
+      else { map = texClay(); } // 💡 色は自然なテラコッタ色に修正済み
 
       const bodyMat = new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive, map, transparent, opacity });
+      if(type === 'magma') bodyMat.emissiveIntensity = emissiveInt;
       
-      // 滑らかなカーブを持つ鉢本体
       const pts = []; const h = 1.0, bR = 0.42, tR = 0.62, rimR = 0.68;
       pts.push(new THREE.Vector2(bR * 0.8, 0.0), new THREE.Vector2(bR, 0.05), new THREE.Vector2(bR * 1.05, 0.3));
       pts.push(new THREE.Vector2(tR * 0.96, h * 0.86), new THREE.Vector2(rimR, h * 0.92), new THREE.Vector2(rimR, h));
@@ -336,7 +303,6 @@
       bodyMesh.castShadow = true; bodyMesh.receiveShadow = true;
       group.add(bodyMesh);
 
-      // ダイナマイトの導火線と火花
       if (type === 'dynamite') {
         const fuseCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, h*0.9, 0), new THREE.Vector3(0.05, h*1.15, 0.03), new THREE.Vector3(-0.02, h*1.32, 0.08)]);
         const fuseMesh = new THREE.Mesh(new THREE.TubeGeometry(fuseCurve, 8, 0.02, 6, false), new THREE.MeshBasicMaterial({ color: 0x332211 }));
@@ -345,13 +311,11 @@
         group.add(fuseMesh); group.add(sparkMesh);
       }
 
-      // 土 (Soil)
       const soilMat = new THREE.MeshStandardMaterial({ map: texSoil(), roughness: 0.96 });
       const soilMesh = new THREE.Mesh(new THREE.CylinderGeometry(tR*0.85, tR*0.76, 0.22, 24), soilMat);
       soilMesh.position.y = h * 0.82; soilMesh.castShadow = true;
       group.add(soilMesh);
 
-      // 葉っぱ・植物 (Leaves)
       let leafColor = 0x2ea048;
       if (type === 'dynamite') leafColor = 0x772211; else if (type === 'crystal') leafColor = 0x44ddee; else if (type === 'magma') leafColor = 0xff6600;
       const leafMat = new THREE.MeshStandardMaterial({ color: leafColor, roughness: type==='crystal'?0.1:0.35, side: THREE.DoubleSide });
@@ -371,14 +335,21 @@
       return { mesh: group, bodyMat, soilMat, leafMat, type };
     }
 
+    // 💡 致命的バグ修正: 必要なすべてのマテリアルを readyPot に保存する
     function spawnReadyPot() {
       if(readyPot) return;
       const model = buildPotModel(activePotType);
-      // スケールを現実サイズ(35cm)に縮小
       model.mesh.scale.set(POT_SCALE, POT_SCALE, POT_SCALE);
       model.mesh.position.copy(ARENA.readyPos);
       scene.add(model.mesh);
-      readyPot = { mesh: model.mesh, mat: model.mat, type: model.type, isGrabbed: false };
+      readyPot = { 
+        mesh: model.mesh, 
+        bodyMat: model.bodyMat, 
+        soilMat: model.soilMat, 
+        leafMat: model.leafMat, 
+        type: model.type, 
+        isGrabbed: false 
+      };
     }
 
     function buildTower() {
@@ -401,24 +372,22 @@
       buildTower();
     }
 
-    // 💡 破砕表現を強化：鉢の破片、土、葉っぱがリアルに飛び散るように
     function shatterPot(fp) {
       scene.remove(fp.mesh);
       playSound('impact', fp.vel.length()/10);
       
-      // 特殊効果でのハプティクス（両手への衝撃）
       if(fp.type === 'dynamite') xrControllers.forEach(c => triggerHaptics(c, 1.0, 300));
       else if(fp.type === 'crystal') xrControllers.forEach(c => triggerHaptics(c, 0.4, 100));
 
       const impactPos = fp.mesh.position;
-      const shardCount = fp.type==='crystal' ? 60 : 30; // 💡 破片の数を倍増して派手に
+      const shardCount = fp.type==='crystal' ? 60 : 30; 
       
-      // 1. 鉢本体の破片
+      // 1. 鉢本体の破片 (💡 平べったい板状にしてリアル化)
       for(let i=0; i<shardCount; i++){
         const sSize = (0.05 + Math.random()*0.05) * (fp.type==='crystal'?0.5:1.0);
         const sm = new THREE.Mesh(new THREE.TetrahedronGeometry(sSize), fp.bodyMat);
         
-        // 💡 Y軸方向にスケールを潰して「平べったい陶器の破片」に見せる
+        // Y軸に押しつぶして板状の陶器破片にする
         sm.scale.set(1.2 + Math.random(), 0.15, 1.0 + Math.random());
         
         sm.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, 0));
@@ -427,7 +396,7 @@
         scene.add(sm);
       }
       
-      // 2. 土の破片 (根鉢と細かい土)
+      // 2. 土の飛散
       for(let i=0; i<10; i++){
         const sSize = i===0 ? 0.15 : 0.03 + Math.random()*0.03; 
         const sm = new THREE.Mesh(new THREE.DodecahedronGeometry(sSize, 0), fp.soilMat);
@@ -437,7 +406,7 @@
         scene.add(sm);
       }
 
-      // 3. 葉っぱの飛散
+      // 3. 葉の飛散
       const foliageCount = fp.type==='dynamite'?3:6;
       for(let i=0; i<foliageCount; i++){
         const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.2), fp.leafMat);
@@ -448,7 +417,6 @@
     }
 
     function stepPhysics(dt) {
-      // 空間のパーティクルをゆっくり回す
       if(ambientParticles) ambientParticles.rotation.y += dt * 0.05;
 
       for(let i=flyingPots.length-1; i>=0; i--){
@@ -457,7 +425,6 @@
         fp.mesh.position.addScaledVector(fp.vel, dt);
         fp.mesh.rotation.x += fp.angVel.x * dt; fp.mesh.rotation.y += fp.angVel.y * dt;
         
-        // タワー衝突
         let hit = false;
         for(let tb of towerBlocks){
           if(fp.mesh.position.distanceTo(tb.mesh.position) < tb.radius + POT_SCALE*0.5) {
@@ -509,7 +476,7 @@
 
     window.onload = function() {
       initScene();
-      renderer.setAnimationLoop(animateFrame); // 唯一の描画ループ
+      renderer.setAnimationLoop(animateFrame);
     };
   </script>
 </body>
