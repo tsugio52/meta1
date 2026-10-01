@@ -67,7 +67,7 @@
       floorY: 0,        // 床は完全に Y = 0 (現実と同じ)
       sideX: 6.0,       // 部屋の横幅 (±6m)
       ceilY: 6.0,       // 天井の高さ (6m)
-      readyPos: new THREE.Vector3(0, 0.85, -0.6) // プレイヤーの目の前、腰〜胸の高さの台座
+      readyPos: new THREE.Vector3(0, 0.95, -0.75) // 💡 距離を少し離し、自然に腕を伸ばした位置に調整
     };
     
     const GRAVITY = -9.8; // 現実の重力加速度
@@ -104,7 +104,11 @@
     function createCanvas(w, h, fn) { const c = document.createElement('canvas'); c.width = w; c.height = h; fn(c.getContext('2d'), w, h); return c; }
     function texWall() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#1e2126'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#2a2d34'; ctx.fillRect(0,0,w,h/2); ctx.fillRect(0,h/2,w/2,h/2); ctx.fillRect(w/2,h/2,w/2,h/2); })); }
     function texFloor() { const t = new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#0f1115'; ctx.fillRect(0,0,w,h); for(let i=0;i<2000;i++){ ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(Math.random()*w,Math.random()*h,2,2); } })); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(10,10); return t; }
-    function texClay() { return new THREE.CanvasTexture(createCanvas(128, 128, (ctx, w, h) => { ctx.fillStyle='#b84d30'; ctx.fillRect(0,0,w,h); for(let i=0;i<1000;i++){ ctx.fillStyle='rgba(0,0,0,0.1)'; ctx.fillRect(Math.random()*w,Math.random()*h,1,1); } })); }
+    
+    // 💡 リアルなプロシージャルテクスチャ群を復活
+    function texClay() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#b84d30'; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h), d=img.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*30; d[i]=Math.min(255,Math.max(0,d[i]+n)); d[i+1]=Math.min(255,Math.max(0,d[i+1]+n*0.7)); d[i+2]=Math.min(255,Math.max(0,d[i+2]+n*0.4)); } ctx.putImageData(img,0,0); })); }
+    function texSoil() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#1d120d'; ctx.fillRect(0,0,w,h); for(let i=0;i<1500;i++){ ctx.fillStyle=Math.random()>0.4?'rgba(65,42,28,0.75)':'rgba(8,6,4,0.9)'; ctx.beginPath(); ctx.arc(Math.random()*w,Math.random()*h,Math.random()*2+0.5,0,Math.PI*2); ctx.fill(); } })); }
+    function texMagma() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#181210'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='#ff4400'; ctx.lineWidth=8; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12; for(let i=0;i<12;i++){ ctx.beginPath(); let tx=Math.random()*w, ty=Math.random()*h; ctx.moveTo(tx,ty); for(let s=0;s<6;s++){ tx+=(Math.random()-0.5)*80; ty+=(Math.random()-0.5)*80; ctx.lineTo(tx,ty); } ctx.stroke(); } })); }
     function texCrate() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#8b5a2b'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='#3e2410'; ctx.lineWidth=8; ctx.strokeRect(4,4,w-8,h-8); ctx.beginPath(); ctx.moveTo(4,4); ctx.lineTo(w-4,h-4); ctx.moveTo(w-4,4); ctx.lineTo(4,h-4); ctx.stroke(); })); }
 
     function initScene() {
@@ -270,7 +274,8 @@
             const vel = ctrl.userData.velocity.clone().multiplyScalar(2.0); 
             if (vel.lengthSq() < 0.5) vel.set(0, 0, 0); // ぽろっと落とす
             
-            flyingPots.push({ mesh: pot.mesh, mat: pot.mat, type: pot.type, vel: vel, angVel: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15, (Math.random()-0.5)*15) });
+            // 💡 鉢本体・土・葉っぱのすべてのマテリアルを一緒に投げる
+            flyingPots.push({ mesh: pot.mesh, bodyMat: pot.bodyMat, soilMat: pot.soilMat, leafMat: pot.leafMat, type: pot.type, vel: vel, angVel: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15, (Math.random()-0.5)*15) });
             readyPot = null;
             
             triggerHaptics(ctrl, Math.min(vel.length()/15, 1.0), 60); // 💡 投げた勢いに応じた振動
@@ -308,17 +313,60 @@
       });
     }
 
+    // 💡 植木鉢のモデル生成をリアルな植物＆土付きのハイポリゴンにアップグレード
     function buildPotModel(type) {
-      let color = 0xc05335, emissive = 0x000000;
-      if(type === 'dynamite') { color = 0xd91e18; emissive = 0x330000; }
-      else if(type === 'crystal') { color = 0x88e7ff; }
+      const group = new THREE.Group();
+      let color = 0xc05335, emissive = 0x000000, roughness = 0.85, metalness = 0.05, map = null, transparent = false, opacity = 1.0;
       
-      const mat = new THREE.MeshStandardMaterial({ color: color, roughness: type==='crystal'?0.1:0.8, emissive: emissive, transparent: type==='crystal', opacity: type==='crystal'?0.8:1.0, map: type==='terracotta'?texClay():null });
-      const pts = []; const h = 1.0, r = 0.5;
-      pts.push(new THREE.Vector2(r*0.7,0), new THREE.Vector2(r,h*0.3), new THREE.Vector2(r*0.9,h*0.8), new THREE.Vector2(r,h), new THREE.Vector2(r*0.9,h), new THREE.Vector2(0.1,0.1));
-      const mesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 24), mat);
-      mesh.castShadow = true;
-      return { mesh, mat, type };
+      if(type === 'dynamite') { color = 0xd91e18; emissive = 0x550505; roughness = 0.35; metalness = 0.2; }
+      else if(type === 'crystal') { color = 0x88e7ff; roughness = 0.06; metalness = 0.1; transparent = true; opacity = 0.82; }
+      else if(type === 'magma') { map = texMagma(); roughness = 0.7; emissive = 0xff3300; emissiveIntensity = 0.55; }
+      else { map = texClay(); }
+
+      const bodyMat = new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive, map, transparent, opacity });
+      
+      // 滑らかなカーブを持つ鉢本体
+      const pts = []; const h = 1.0, bR = 0.42, tR = 0.62, rimR = 0.68;
+      pts.push(new THREE.Vector2(bR * 0.8, 0.0), new THREE.Vector2(bR, 0.05), new THREE.Vector2(bR * 1.05, 0.3));
+      pts.push(new THREE.Vector2(tR * 0.96, h * 0.86), new THREE.Vector2(rimR, h * 0.92), new THREE.Vector2(rimR, h));
+      pts.push(new THREE.Vector2(rimR * 0.91, h), new THREE.Vector2(tR * 0.85, h * 0.86), new THREE.Vector2(bR * 0.75, 0.12), new THREE.Vector2(0.12, 0.1));
+      const bodyMesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 32), bodyMat);
+      bodyMesh.castShadow = true; bodyMesh.receiveShadow = true;
+      group.add(bodyMesh);
+
+      // ダイナマイトの導火線と火花
+      if (type === 'dynamite') {
+        const fuseCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, h*0.9, 0), new THREE.Vector3(0.05, h*1.15, 0.03), new THREE.Vector3(-0.02, h*1.32, 0.08)]);
+        const fuseMesh = new THREE.Mesh(new THREE.TubeGeometry(fuseCurve, 8, 0.02, 6, false), new THREE.MeshBasicMaterial({ color: 0x332211 }));
+        const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffdd44 }));
+        sparkMesh.position.set(-0.02, h*1.32, 0.08);
+        group.add(fuseMesh); group.add(sparkMesh);
+      }
+
+      // 土 (Soil)
+      const soilMat = new THREE.MeshStandardMaterial({ map: texSoil(), roughness: 0.96 });
+      const soilMesh = new THREE.Mesh(new THREE.CylinderGeometry(tR*0.85, tR*0.76, 0.22, 24), soilMat);
+      soilMesh.position.y = h * 0.82; soilMesh.castShadow = true;
+      group.add(soilMesh);
+
+      // 葉っぱ・植物 (Leaves)
+      let leafColor = 0x2ea048;
+      if (type === 'dynamite') leafColor = 0x772211; else if (type === 'crystal') leafColor = 0x44ddee; else if (type === 'magma') leafColor = 0xff6600;
+      const leafMat = new THREE.MeshStandardMaterial({ color: leafColor, roughness: type==='crystal'?0.1:0.35, side: THREE.DoubleSide });
+      const plantGroup = new THREE.Group(); plantGroup.position.y = h * 0.86;
+      const leafCount = type==='dynamite'?5:10;
+      for (let i = 0; i < leafCount; i++) {
+        const ang = (i / leafCount) * Math.PI * 2 + Math.random() * 0.3;
+        const stemCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0,0,0), new THREE.Vector3(Math.cos(ang)*0.28, 0.38+Math.random()*0.2, Math.sin(ang)*0.28), new THREE.Vector3(Math.cos(ang)*0.58, 0.54+Math.random()*0.25, Math.sin(ang)*0.58)]);
+        const stem = new THREE.Mesh(new THREE.TubeGeometry(stemCurve, 8, 0.025, 5, false), new THREE.MeshStandardMaterial({ color: 0x1b4d24 }));
+        const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.65), leafMat);
+        leaf.position.copy(stemCurve.getPoint(1.0));
+        leaf.rotation.set(0.45+Math.random()*0.25, ang-Math.PI/2, (Math.random()-0.5)*0.4);
+        plantGroup.add(stem); plantGroup.add(leaf);
+      }
+      group.add(plantGroup);
+
+      return { mesh: group, bodyMat, soilMat, leafMat, type };
     }
 
     function spawnReadyPot() {
@@ -351,6 +399,7 @@
       buildTower();
     }
 
+    // 💡 破砕表現を強化：鉢の破片、土、葉っぱがリアルに飛び散るように
     function shatterPot(fp) {
       scene.remove(fp.mesh);
       playSound('impact', fp.vel.length()/10);
@@ -359,13 +408,35 @@
       if(fp.type === 'dynamite') xrControllers.forEach(c => triggerHaptics(c, 1.0, 300));
       else if(fp.type === 'crystal') xrControllers.forEach(c => triggerHaptics(c, 0.4, 100));
 
-      const shardCount = fp.type==='crystal' ? 60 : 15;
+      const impactPos = fp.mesh.position;
+      const shardCount = fp.type==='crystal' ? 40 : 15;
+      
+      // 1. 鉢本体の破片
       for(let i=0; i<shardCount; i++){
         const sSize = (0.05 + Math.random()*0.05) * (fp.type==='crystal'?0.5:1.0);
-        const sm = new THREE.Mesh(new THREE.TetrahedronGeometry(sSize), fp.mat);
-        sm.position.copy(fp.mesh.position).add(new THREE.Vector3((Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2, 0));
+        const sm = new THREE.Mesh(new THREE.TetrahedronGeometry(sSize), fp.bodyMat);
+        sm.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, 0));
         const ang = Math.random()*Math.PI*2, force = (Math.random()*0.5+0.5) * fp.vel.length() * (fp.type==='dynamite'?1.5:0.5);
         shards.push({ mesh: sm, vel: new THREE.Vector3(Math.cos(ang)*force+fp.vel.x*0.2, Math.sin(ang)*force+Math.random()*3, Math.abs(fp.vel.z)*0.3), angVel: new THREE.Vector3((Math.random()-0.5)*20, (Math.random()-0.5)*20, 0), radius: sSize, isResting: false });
+        scene.add(sm);
+      }
+      
+      // 2. 土の破片 (根鉢と細かい土)
+      for(let i=0; i<10; i++){
+        const sSize = i===0 ? 0.15 : 0.03 + Math.random()*0.03; 
+        const sm = new THREE.Mesh(new THREE.DodecahedronGeometry(sSize, 0), fp.soilMat);
+        sm.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.2, 0.1, (Math.random()-0.5)*0.2));
+        const force = (Math.random()*0.4+0.2) * fp.vel.length();
+        shards.push({ mesh: sm, vel: new THREE.Vector3((Math.random()-0.5)*force+fp.vel.x*0.1, Math.random()*2+1, Math.abs(fp.vel.z)*0.2), angVel: new THREE.Vector3((Math.random()-0.5)*10, (Math.random()-0.5)*10, 0), radius: sSize, isResting: false });
+        scene.add(sm);
+      }
+
+      // 3. 葉っぱの飛散
+      const foliageCount = fp.type==='dynamite'?3:6;
+      for(let i=0; i<foliageCount; i++){
+        const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.2), fp.leafMat);
+        sm.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.4, 0.2, (Math.random()-0.5)*0.4));
+        shards.push({ mesh: sm, vel: new THREE.Vector3((Math.random()-0.5)*3, Math.random()*3+1, Math.abs(fp.vel.z)*0.1), angVel: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15, (Math.random()-0.5)*15), radius: 0.05, isResting: false });
         scene.add(sm);
       }
     }
