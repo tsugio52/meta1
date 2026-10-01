@@ -7,7 +7,6 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Three.js & VRButton -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/VRButton.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <style>
@@ -31,8 +30,13 @@
       <span class="text-sm font-black tracking-widest text-white">TRUE IMMERSIVE VR</span>
     </div>
 
+    <!-- 👇 外部スクリプトに依存しない、絶対に見える超大型カスタムVRボタン -->
+    <button id="custom-vr-btn" class="absolute bottom-[220px] left-1/2 -translate-x-1/2 px-10 py-5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-full shadow-[0_0_40px_rgba(249,115,22,0.8)] pointer-events-auto transform transition-all active:scale-95 text-3xl flex items-center gap-4 border-2 border-white/40 z-50">
+      <i class="fa-solid fa-vr-cardboard text-4xl"></i> ENTER VR
+    </button>
+
     <!-- 画面下のENTER VRボタン横に表示する説明 -->
-    <div class="absolute bottom-20 left-1/2 -translate-x-1/2 glass-card px-6 py-4 rounded-2xl flex flex-col items-center pointer-events-auto max-w-sm w-full">
+    <div class="absolute bottom-10 left-1/2 -translate-x-1/2 glass-card px-6 py-4 rounded-2xl flex flex-col items-center pointer-events-auto max-w-sm w-full">
       <h3 class="text-amber-400 font-bold mb-2 text-sm"><i class="fa-solid fa-hands"></i> 没入型VR操作ガイド</h3>
       <ul class="text-xs text-slate-300 space-y-1.5 w-full">
         <li><span class="inline-block w-6 text-center text-white bg-white/10 rounded mr-1">👆</span> <b>人差し指トリガー:</b> 鉢を掴む / 投げる</li>
@@ -120,7 +124,7 @@
       
       // VR有効化
       renderer.xr.enabled = true;
-      document.body.appendChild(VRButton.createButton(renderer));
+      setupCustomVRButton();
 
       // 💡 VRカメラ空間: 原点に設定することで、現実の身長と床(Y=0)が完全一致する
       xrCameraSpace = new THREE.Group();
@@ -148,6 +152,37 @@
         document.getElementById('ui-layer').style.opacity = '1';
         camera.position.set(0, 1.4, 2.0); // VR終了時にカメラ位置を復帰
       });
+    }
+
+    // 💡 外部スクリプトに頼らず、自前で確実にVRセッションを起動・エラー判定する処理
+    function setupCustomVRButton() {
+      const vrBtn = document.getElementById('custom-vr-btn');
+      if ('xr' in navigator) {
+        navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+          if (supported) {
+            vrBtn.addEventListener('click', async () => {
+              try {
+                const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+                renderer.xr.setSession(session);
+              } catch (e) {
+                alert('VRの起動に失敗しました: ' + e.message);
+              }
+            });
+          } else {
+            vrBtn.innerHTML = 'VR非対応デバイス';
+            vrBtn.classList.replace('from-orange-500', 'from-slate-600');
+            vrBtn.classList.replace('to-amber-500', 'to-slate-500');
+            vrBtn.disabled = true;
+          }
+        });
+      } else {
+        // HTTPSでない場合、navigator.xr自体が存在しないためここに来る
+        vrBtn.innerHTML = '<span class="text-lg">HTTPS(暗号化)接続が必要です</span>';
+        vrBtn.classList.replace('from-orange-500', 'from-rose-700');
+        vrBtn.classList.replace('to-amber-500', 'to-rose-600');
+        vrBtn.style.boxShadow = "0 0 30px rgba(225, 29, 72, 0.8)";
+        vrBtn.disabled = true;
+      }
     }
 
     function setupImmersiveEnvironment() {
