@@ -67,7 +67,7 @@
       floorY: 0,        // 床は完全に Y = 0 (現実と同じ)
       sideX: 6.0,       // 部屋の横幅 (±6m)
       ceilY: 6.0,       // 天井の高さ (6m)
-      readyPos: new THREE.Vector3(0, 0.95, -0.75) // 💡 距離を少し離し、自然に腕を伸ばした位置に調整
+      readyPos: new THREE.Vector3(0, 0.85, -1.1) // 💡 ハンドトラッキングでも認識しやすいように少し下＆さらに奥へ
     };
     
     const GRAVITY = -9.8; // 現実の重力加速度
@@ -106,7 +106,7 @@
     function texFloor() { const t = new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#0f1115'; ctx.fillRect(0,0,w,h); for(let i=0;i<2000;i++){ ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(Math.random()*w,Math.random()*h,2,2); } })); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(10,10); return t; }
     
     // 💡 リアルなプロシージャルテクスチャ群を復活
-    function texClay() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#b84d30'; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h), d=img.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*30; d[i]=Math.min(255,Math.max(0,d[i]+n)); d[i+1]=Math.min(255,Math.max(0,d[i+1]+n*0.7)); d[i+2]=Math.min(255,Math.max(0,d[i+2]+n*0.4)); } ctx.putImageData(img,0,0); })); }
+    function texClay() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#a86a45'; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h), d=img.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*25; d[i]=Math.min(255,Math.max(0,d[i]+n)); d[i+1]=Math.min(255,Math.max(0,d[i+1]+n*0.7)); d[i+2]=Math.min(255,Math.max(0,d[i+2]+n*0.4)); } ctx.putImageData(img,0,0); })); }
     function texSoil() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#1d120d'; ctx.fillRect(0,0,w,h); for(let i=0;i<1500;i++){ ctx.fillStyle=Math.random()>0.4?'rgba(65,42,28,0.75)':'rgba(8,6,4,0.9)'; ctx.beginPath(); ctx.arc(Math.random()*w,Math.random()*h,Math.random()*2+0.5,0,Math.PI*2); ctx.fill(); } })); }
     function texMagma() { return new THREE.CanvasTexture(createCanvas(512, 512, (ctx, w, h) => { ctx.fillStyle='#181210'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='#ff4400'; ctx.lineWidth=8; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12; for(let i=0;i<12;i++){ ctx.beginPath(); let tx=Math.random()*w, ty=Math.random()*h; ctx.moveTo(tx,ty); for(let s=0;s<6;s++){ tx+=(Math.random()-0.5)*80; ty+=(Math.random()-0.5)*80; ctx.lineTo(tx,ty); } ctx.stroke(); } })); }
     function texCrate() { return new THREE.CanvasTexture(createCanvas(256, 256, (ctx, w, h) => { ctx.fillStyle='#8b5a2b'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='#3e2410'; ctx.lineWidth=8; ctx.strokeRect(4,4,w-8,h-8); ctx.beginPath(); ctx.moveTo(4,4); ctx.lineTo(w-4,h-4); ctx.moveTo(w-4,4); ctx.lineTo(4,h-4); ctx.stroke(); })); }
@@ -206,8 +206,9 @@
       scene.add(floor);
 
       // 目の前の台座 (手を伸ばせば届く位置)
-      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.8, 16), new THREE.MeshStandardMaterial({ color: 0x222530, roughness: 0.6 }));
-      pedestal.position.set(ARENA.readyPos.x, ARENA.floorY + 0.4, ARENA.readyPos.z);
+      const pedH = ARENA.readyPos.y;
+      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, pedH, 16), new THREE.MeshStandardMaterial({ color: 0x222530, roughness: 0.6 }));
+      pedestal.position.set(ARENA.readyPos.x, ARENA.floorY + pedH/2, ARENA.readyPos.z);
       pedestal.castShadow = true; pedestal.receiveShadow = true;
       scene.add(pedestal);
 
@@ -316,7 +317,8 @@
     // 💡 植木鉢のモデル生成をリアルな植物＆土付きのハイポリゴンにアップグレード
     function buildPotModel(type) {
       const group = new THREE.Group();
-      let color = 0xc05335, emissive = 0x000000, roughness = 0.85, metalness = 0.05, map = null, transparent = false, opacity = 1.0;
+      // デフォルトの色を白にして、テクスチャ本来の色（自然な素焼き色）をそのまま活かす
+      let color = 0xffffff, emissive = 0x000000, roughness = 0.9, metalness = 0.02, map = null, transparent = false, opacity = 1.0;
       
       if(type === 'dynamite') { color = 0xd91e18; emissive = 0x550505; roughness = 0.35; metalness = 0.2; }
       else if(type === 'crystal') { color = 0x88e7ff; roughness = 0.06; metalness = 0.1; transparent = true; opacity = 0.82; }
@@ -409,12 +411,16 @@
       else if(fp.type === 'crystal') xrControllers.forEach(c => triggerHaptics(c, 0.4, 100));
 
       const impactPos = fp.mesh.position;
-      const shardCount = fp.type==='crystal' ? 40 : 15;
+      const shardCount = fp.type==='crystal' ? 60 : 30; // 💡 破片の数を倍増して派手に
       
       // 1. 鉢本体の破片
       for(let i=0; i<shardCount; i++){
         const sSize = (0.05 + Math.random()*0.05) * (fp.type==='crystal'?0.5:1.0);
         const sm = new THREE.Mesh(new THREE.TetrahedronGeometry(sSize), fp.bodyMat);
+        
+        // 💡 Y軸方向にスケールを潰して「平べったい陶器の破片」に見せる
+        sm.scale.set(1.2 + Math.random(), 0.15, 1.0 + Math.random());
+        
         sm.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, 0));
         const ang = Math.random()*Math.PI*2, force = (Math.random()*0.5+0.5) * fp.vel.length() * (fp.type==='dynamite'?1.5:0.5);
         shards.push({ mesh: sm, vel: new THREE.Vector3(Math.cos(ang)*force+fp.vel.x*0.2, Math.sin(ang)*force+Math.random()*3, Math.abs(fp.vel.z)*0.3), angVel: new THREE.Vector3((Math.random()-0.5)*20, (Math.random()-0.5)*20, 0), radius: sSize, isResting: false });
