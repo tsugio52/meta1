@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pottery Smash 3D VR - リアル植木鉢投擲シミュレーター</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js (3D Engine) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Three.js VRButton (for WebXR support) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/VRButton.js"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      background-color: #08090c;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    /* Glass UI effect */
+    .glass-card {
+      background: rgba(14, 18, 27, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    }
+    
+    .glass-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    
+    .glass-btn:hover {
+      background: rgba(255, 255, 255, 0.22);
+      transform: scale(1.05);
+      box-shadow: 0 6px 20px rgba(249, 115, 22, 0.35);
+    }
+
+    .glass-btn:active {
+      transform: scale(0.95);
+    }
+
+    /* Dramatic Speed Lines during heavy throw */
+    #speed-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.12s ease-out;
+      background: radial-gradient(circle, transparent 40%, rgba(255, 120, 30, 0.18) 85%, rgba(255, 60, 0, 0.4) 100%);
+      mix-blend-mode: screen;
+    }
+
+    .speed-lines {
+      background-image: repeating-conic-gradient(from 0deg, rgba(255,255,255,0.18) 0deg 2deg, transparent 2deg 12deg);
+      mask-image: radial-gradient(circle, transparent 45%, black 80%);
+      -webkit-mask-image: radial-gradient(circle, transparent 45%, black 80%);
+    }
+
+    /* Trajectory SVG */
+    #trajectory-svg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+    }
+
+    /* Target Reticle Pulsing */
+    @keyframes rippleAnim {
+      0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+    }
+    .tap-ripple {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      border: 3px solid #fb923c;
+      border-radius: 50%;
+      pointer-events: none;
+      animation: rippleAnim 0.45s ease-out forwards;
+      z-index: 25;
+    }
+
+    /* Impact flash */
+    #flash-overlay {
+      position: absolute;
+      inset: 0;
+      background: white;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.08s ease-out;
+      z-index: 30;
+    }
+
+    /* Crash Popup */
+    @keyframes crashPopupAnim {
+      0% { transform: translate(-50%, -50%) scale(0.4) rotate(-8deg); opacity: 0; }
+      20% { transform: translate(-50%, -50%) scale(1.25) rotate(4deg); opacity: 1; }
+      40% { transform: translate(-50%, -50%) scale(1.0) rotate(0deg); opacity: 1; }
+      80% { transform: translate(-50%, -50%) scale(1.05) rotate(-2deg); opacity: 0.9; }
+      100% { transform: translate(-50%, -85%) scale(1.3) rotate(0deg); opacity: 0; }
+    }
+    .crash-popup {
+      position: absolute;
+      top: 38%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 35;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      animation: crashPopupAnim 0.85s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+      text-shadow: 0 0 24px rgba(249, 115, 22, 0.85), 0 4px 14px rgba(0, 0, 0, 0.95);
+    }
+
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .shotgun-active { background: linear-gradient(135deg, #a855f7, #ec4899) !important; box-shadow: 0 0 18px rgba(236, 72, 153, 0.7) !important; border-color: rgba(255, 255, 255, 0.8) !important; }
+  </style>
+</head>
+<body class="relative w-full h-full text-slate-100">
+
+  <!-- 3D WebGL Canvas Layer -->
+  <div id="canvas-container"></div>
+
+  <!-- Visual Feedback Overlays -->
+  <div id="speed-overlay" class="speed-lines z-10"></div>
+  <div id="flash-overlay"></div>
+
+  <!-- Trajectory drag guide SVG -->
+  <svg id="trajectory-svg" class="w-full h-full">
+    <line id="aim-line" x1="0" y1="0" x2="0" y2="0" stroke="rgba(251, 146, 60, 0.85)" stroke-width="3.5" stroke-dasharray="8 6" stroke-linecap="round" />
+    <circle id="aim-target" cx="0" cy="0" r="14" fill="rgba(249, 115, 22, 0.3)" stroke="#fb923c" stroke-width="2.5" />
+  </svg>
+
+  <!-- Header -->
+  <div class="absolute top-2 left-2 pointer-events-none z-20 flex items-center space-x-2">
+    <div class="glass-card rounded-xl px-2.5 py-1 flex items-center space-x-1.5 pointer-events-auto">
+      <div class="w-5 h-5 rounded-md bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white text-xs">
+        <i class="fa-solid fa-vr-cardboard"></i>
+      </div>
+      <span class="text-[11px] font-black tracking-wide text-white">POTTERY SMASH XR</span>
+    </div>
+  </div>
+
+  <!-- Telemetry -->
+  <div class="absolute top-2 right-2 pointer-events-none z-20 flex items-center space-x-1.5">
+    <div class="glass-card rounded-xl px-2 py-1 pointer-events-auto flex items-center space-x-1.5 text-[11px]">
+      <span class="text-slate-400 font-bold">撃破:</span>
+      <span id="stat-smashes" class="font-black text-amber-400">0</span>
+    </div>
+    <div class="glass-card rounded-xl px-2 py-1 pointer-events-auto flex items-center space-x-1 text-[11px]">
+      <span class="text-slate-400 font-bold">球速:</span>
+      <span id="stat-speed" class="font-black text-cyan-400">0 <span class="text-[9px]">km/h</span></span>
+    </div>
+  </div>
+
+  <!-- Left Dock: Pots Palette -->
+  <div class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none z-20 flex flex-col items-center">
+    <div class="glass-card rounded-2xl p-1.5 flex flex-col gap-1.5 pointer-events-auto max-h-[82vh] overflow-y-auto no-scrollbar shadow-2xl" onpointerdown="event.stopPropagation()">
+      <div class="text-[9px] font-black text-slate-400 text-center tracking-widest uppercase mb-0.5">鉢素材</div>
+      <button id="type-terracotta" onclick="setPotType('terracotta')" class="pot-type-btn active w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-md transition" title="素焼き鉢"><i class="fa-solid fa-seedling text-sm"></i><span class="text-[9px] mt-0.5">素焼き</span></button>
+      <button id="type-glazed" onclick="setPotType('glazed')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition" title="瑠璃青磁鉢"><i class="fa-solid fa-gem text-sm text-cyan-400"></i><span class="text-[9px] mt-0.5">青磁</span></button>
+      <button id="type-porcelain" onclick="setPotType('porcelain')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition" title="白磁鉢"><i class="fa-solid fa-leaf text-sm text-emerald-400"></i><span class="text-[9px] mt-0.5">白磁</span></button>
+      <button id="type-concrete" onclick="setPotType('concrete')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition" title="モルタル鉢"><i class="fa-solid fa-cube text-sm text-slate-400"></i><span class="text-[9px] mt-0.5">石材</span></button>
+      <div class="w-8 h-[1px] bg-white/20 my-0.5 self-center"></div>
+      <button id="type-dynamite" onclick="setPotType('dynamite')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-rose-300 hover:text-white hover:bg-rose-600/30 border border-rose-500/30 transition" title="💣 ダイナマイト鉢 (大爆発)"><i class="fa-solid fa-bomb text-sm text-rose-400"></i><span class="text-[9px] mt-0.5">爆弾</span></button>
+      <button id="type-crystal" onclick="setPotType('crystal')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-cyan-300 hover:text-white hover:bg-cyan-600/30 border border-cyan-500/30 transition" title="💎 クリスタル鉢 (140破片)"><i class="fa-solid fa-wand-magic-sparkles text-sm text-cyan-300"></i><span class="text-[9px] mt-0.5">水晶</span></button>
+      <button id="type-magma" onclick="setPotType('magma')" class="pot-type-btn w-12 h-11 rounded-xl text-xs font-bold flex flex-col items-center justify-center text-amber-300 hover:text-white hover:bg-amber-600/30 border border-amber-500/30 transition" title="🌋 溶岩鉢 (超重量激震)"><i class="fa-solid fa-volcano text-sm text-amber-400"></i><span class="text-[9px] mt-0.5">溶岩</span></button>
+    </div>
+  </div>
+
+  <!-- Right Dock: Utilities -->
+  <div class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none z-20 flex flex-col items-end gap-2.5">
+    <div class="glass-card rounded-2xl p-1.5 flex flex-col gap-1.5 pointer-events-auto shadow-xl" onpointerdown="event.stopPropagation()">
+      <button onclick="resetTower()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-amber-300 hover:bg-amber-500/20" title="ピラミッドタワーを再構築"><i class="fa-solid fa-cubes-stacked text-sm"></i></button>
+      <button id="cam-toggle-btn" onclick="cycleCameraView()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-slate-200" title="カメラ視点切替 (非VR用)"><i class="fa-solid fa-video text-sm text-amber-400"></i></button>
+      <button id="slowmo-btn" onclick="toggleSlowMo()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-slate-200" title="スローモーション"><i class="fa-solid fa-gauge-high text-sm text-cyan-400"></i></button>
+      <button onclick="respawnReadyPot()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-slate-200 hover:text-amber-400" title="新しい鉢を構える"><i class="fa-solid fa-rotate-left text-sm"></i></button>
+      <button onclick="clearRoom()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-slate-300 hover:text-rose-400" title="破片と壁の傷を清掃"><i class="fa-solid fa-broom text-sm"></i></button>
+      <button id="sound-btn" onclick="toggleAudio()" class="glass-btn w-11 h-10 rounded-xl flex items-center justify-center text-amber-400" title="サウンド切り替え"><i class="fa-solid fa-volume-high text-sm"></i></button>
+    </div>
+    <div class="flex flex-col gap-2 pointer-events-auto" onpointerdown="event.stopPropagation()">
+      <button id="shotgun-toggle-btn" onclick="toggleShotgunMode()" class="glass-btn w-14 h-12 rounded-2xl flex flex-col items-center justify-center text-slate-200 border border-purple-400/40 hover:text-white shadow-lg" title="3連ショットガン"><i class="fa-solid fa-burst text-purple-400 text-sm"></i><span id="shotgun-label" class="text-[9px] font-black mt-0.5">3連:OFF</span></button>
+      <button onclick="forceThrow(1.5)" class="w-14 h-14 rounded-2xl flex flex-col items-center justify-center text-white bg-gradient-to-tr from-orange-600 via-rose-600 to-amber-500 shadow-xl shadow-orange-600/50 border border-white/20 active:scale-95 transition" title="全力投球"><i class="fa-solid fa-meteor text-amber-200 text-base"></i><span class="text-[9px] font-black tracking-tighter mt-0.5">全力投球</span></button>
+    </div>
+  </div>
+
+  <!-- Reticle -->
+  <div id="reticle-hud" class="absolute pointer-events-none z-15 transition-opacity duration-150 opacity-0 flex flex-col items-center">
+    <div class="relative w-20 h-20 flex items-center justify-center">
+      <div id="power-ring" class="absolute inset-0 rounded-full border-4 border-amber-400/80 border-t-transparent animate-spin"></div>
+      <div class="w-5 h-5 rounded-full bg-gradient-to-tr from-orange-500 to-rose-500 shadow-xl shadow-orange-500/80"></div>
+    </div>
+    <div id="power-gauge" class="mt-1 px-3 py-1 bg-black/80 backdrop-blur-md border border-orange-500/50 rounded-full text-[11px] font-black tracking-widest text-amber-300">AIM</div>
+  </div>
+
+  <!-- Guide Modal -->
+  <div id="guide-modal" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-card rounded-3xl p-5 text-center max-w-sm pointer-events-none z-20 transition-all duration-500 shadow-2xl">
+    <div class="w-12 h-12 mx-auto rounded-2xl bg-gradient-to-tr from-orange-600 to-amber-500 text-white flex items-center justify-center text-2xl mb-2.5 shadow-lg shadow-orange-500/40 animate-pulse">
+      <i class="fa-solid fa-vr-cardboard"></i>
+    </div>
+    <h2 class="text-base font-black text-white mb-1">Meta Quest対応！</h2>
+    <p class="text-[11px] text-slate-300 leading-relaxed mb-3 text-left">
+      ・ 画面下の <strong>ENTER VR</strong> で没入モードへ。<br>
+      ・ <strong>トリガー:</strong> 鉢を掴む / 離して投げる<br>
+      ・ <strong>右グリップ:</strong> 鉢の種類チェンジ<br>
+      ・ <strong>左グリップ:</strong> タワーを再構築＆清掃<br>
+      <span class="text-amber-400 text-[10px] mt-1 block text-center">※スマホ・PCブラウザからは画面をスワイプで投げられます。</span>
+    </p>
+    <div class="inline-block px-2.5 py-0.5 rounded-full bg-white/10 text-[10px] text-amber-200 font-semibold border border-white/10">画面タップで開始</div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notify" class="absolute bottom-16 left-1/2 -translate-x-1/2 glass-card px-4 py-1.5 rounded-xl text-xs text-amber-300 opacity-0 transition-opacity duration-300 pointer-events-none z-30 font-semibold shadow-xl">
+    起動完了
+  </div>
+
+  <script>
+    let scene, camera, renderer;
+    let readyPot = null;              
+    let flyingPots = [];              
+    let shards = [];
+    let soilParticles = [];
+    let rootBallDebris = [];
+    let foliagePieces = [];
+    let dustClouds = [];
+    let potTrails = [];               
+    let wallImpactDecals = [];
+    let speedLinesActive = false;
+
+    // Controllers for WebXR
+    let xrControllers = [];
+
+    let isShotgunMode = false;
+    let hitStopTimer = 0;             
+    let shockwaves = [];              
+    let towerBlocks = [];             
+    let crateTexture = null;
+
+    let raycaster, mouseNorm;
+    let wallAimPlane;
+    let wallTargetMarker;
+    let currentAimTarget = new THREE.Vector3(0, 1.2, -6.0);
+    let autoRespawnTimeout = null;
+
+    let isSlowMo = false;
+    let timeScale = 1.0;
+    let audioEnabled = true;
+    let audioCtx = null;
+    let activePotType = 'terracotta';
+    const potTypeArray = ['terracotta', 'glazed', 'porcelain', 'concrete', 'dynamite', 'crystal', 'magma'];
+
+    // Camera Modes (Mainly for Non-VR)
+    let cameraMode = 0;
+    const cameraConfigs = [
+      { label: '投擲手 (FPS)', pos: new THREE.Vector3(0, 1.6, 1.2), target: new THREE.Vector3(0, 1.0, -5.0) },
+      { label: '斜め上俯瞰', pos: new THREE.Vector3(3.6, 3.0, 2.0), target: new THREE.Vector3(-0.3, 0.0, -3.0) },
+      { label: '肩越し (TPS)', pos: new THREE.Vector3(1.2, 1.8, 1.5), target: new THREE.Vector3(-0.15, 0.7, -5.0) }
+    ];
+    let baseCameraPos = new THREE.Vector3().copy(cameraConfigs[0].pos);
+    let cameraOffset = new THREE.Vector3(0, 0, 0);
+    let cameraShake = 0;
+    let cameraFovVelocity = 0;
+
+    let analytics = { smashes: 0, shards: 0, maxSpeed: 0, maxForce: 0 };
+
+    // METRIC SCALE (Y=0 is Floor) for realistic VR perception
+    const XR_SCALE = 0.28; // Scale down pots to be hand-sized
+    const ARENA = {
+      wallZ: -5.0,     // 5 meters away
+      floorY: 0.0,     // Floor at Y=0
+      sideX: 5.0,      // 5m wide each side
+      ceilY: 5.0,
+      readyPos: new THREE.Vector3(0, 0.95, -0.45) // Chest level, right in front of player
+    };
+
+    let activePointerId = null;
+    let isPointerDown = false;
+    let pointerDownPos = { x: 0, y: 0, time: 0 };
+    let dragCurrent = { x: 0, y: 0, time: 0 };
+    let dragHistory = [];
+    let lastThrowTime = 0;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        const AudioClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioClass();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+
+    function playAuthenticImpactAudio(intensity = 1.0) {
+      if (!audioEnabled) return;
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const safeInt = Math.min(Math.max(intensity, 0.5), 2.8);
+
+      const subOsc = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(125, now);
+      subOsc.frequency.exponentialRampToValueAtTime(32, now + 0.22);
+      subGain.gain.setValueAtTime(1.0 * safeInt, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      subOsc.connect(subGain);
+      subGain.connect(ctx.destination);
+      subOsc.start(now);
+      subOsc.stop(now + 0.3);
+
+      for (let i = 0; i < 5; i++) {
+        const delay = 0.03 + i * 0.045 + Math.random() * 0.03;
+        setTimeout(() => {
+          if (!audioEnabled || !audioCtx) return;
+          const clinkOsc = ctx.createOscillator();
+          const clinkGain = ctx.createGain();
+          clinkOsc.frequency.setValueAtTime(3600 + Math.random() * 3200, ctx.currentTime);
+          clinkGain.gain.setValueAtTime(0.14 * safeInt, ctx.currentTime);
+          clinkGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+          clinkOsc.connect(clinkGain);
+          clinkGain.connect(ctx.destination);
+          clinkOsc.start();
+          clinkOsc.stop(ctx.currentTime + 0.08);
+        }, delay * 1000);
+      }
+    }
+
+    function playExplosionAudio() {
+      if (!audioEnabled) return;
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const boomOsc = ctx.createOscillator();
+      const boomGain = ctx.createGain();
+      boomOsc.type = 'sine';
+      boomOsc.frequency.setValueAtTime(160, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(24, now + 0.55);
+      boomGain.gain.setValueAtTime(1.8, now);
+      boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      boomOsc.connect(boomGain);
+      boomGain.connect(ctx.destination);
+      boomOsc.start(now);
+      boomOsc.stop(now + 0.65);
+
+      const nLen = Math.floor(ctx.sampleRate * 0.6);
+      const nBuf = ctx.createBuffer(1, nLen, ctx.sampleRate);
+      const d = nBuf.getChannelData(0);
+      for (let i = 0; i < nLen; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.12));
+      const nSrc = ctx.createBufferSource();
+      nSrc.buffer = nBuf;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(1800, now);
+      f.frequency.exponentialRampToValueAtTime(180, now + 0.5);
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(1.4, now);
+      ng.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      nSrc.connect(f);
+      f.connect(ng);
+      ng.connect(ctx.destination);
+      nSrc.start(now);
+    }
+
+    function playCrystalShatterAudio() {
+      if (!audioEnabled) return;
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      [4200, 5600, 7200, 9400, 11500].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq + Math.random() * 200, now);
+        const decay = 0.25 + idx * 0.08;
+        g.gain.setValueAtTime(0.35 / (idx + 1), now);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + decay);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + decay);
+      });
+    }
+
+    function playBlockCrashAudio(force = 1.0) {
+      if (!audioEnabled) return;
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const thudOsc = ctx.createOscillator();
+      const thudGain = ctx.createGain();
+      thudOsc.type = 'triangle';
+      thudOsc.frequency.setValueAtTime(140, now);
+      thudOsc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
+      thudGain.gain.setValueAtTime(0.75 * force, now);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      thudOsc.connect(thudGain);
+      thudGain.connect(ctx.destination);
+      thudOsc.start(now);
+      thudOsc.stop(now + 0.25);
+    }
+
+    function playThrowWhooshAudio(power = 1.0) {
+      if (!audioEnabled) return;
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const dur = 0.32;
+      const bufLen = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = (Math.random() * 2 - 1) * Math.sin((i / bufLen) * Math.PI);
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(280, now);
+      filter.frequency.linearRampToValueAtTime(1550 * Math.max(power, 0.8), now + 0.12);
+      filter.frequency.exponentialRampToValueAtTime(200, now + dur);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.6 * Math.min(power, 2.0), now + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start(now);
+    }
+
+    function createProceduralCanvas(w, h, drawFn) {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      drawFn(c.getContext('2d'), w, h);
+      return c;
+    }
+
+    function generateWallTexture() {
+      const canvas = createProceduralCanvas(1024, 1024, (ctx, w, h) => {
+        ctx.fillStyle = '#1e2126'; ctx.fillRect(0, 0, w, h);
+        const rH = h / 18, cW = w / 9;
+        for (let r = 0; r < 18; r++) {
+          const off = (r % 2) * (cW * 0.5);
+          for (let c = -1; c < 10; c++) {
+            const bx = c * cW + off, by = r * rH;
+            ctx.fillStyle = `hsl(215, 10%, ${32 + Math.floor(Math.random() * 24)}%)`;
+            ctx.fillRect(bx + 3, by + 3, cW - 6, rH - 6);
+          }
+        }
+      });
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(2, 2);
+      return tex;
+    }
+
+    function generateFloorTexture() {
+      const canvas = createProceduralCanvas(512, 512, (ctx, w, h) => {
+        ctx.fillStyle = '#14161a'; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 6000; i++) {
+          ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.1)';
+          ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+        }
+      });
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(4, 4);
+      return tex;
+    }
+
+    function generateClayTexture() {
+      const canvas = createProceduralCanvas(512, 512, (ctx, w, h) => {
+        ctx.fillStyle = '#c05335'; ctx.fillRect(0, 0, w, h);
+        const img = ctx.getImageData(0, 0, w, h), d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const n = (Math.random() - 0.5) * 40;
+          d[i] = Math.min(255, Math.max(0, d[i] + n));
+          d[i+1] = Math.min(255, Math.max(0, d[i+1] + n * 0.7));
+          d[i+2] = Math.min(255, Math.max(0, d[i+2] + n * 0.4));
+        }
+        ctx.putImageData(img, 0, 0);
+      });
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function generateSoilTexture() {
+      const canvas = createProceduralCanvas(256, 256, (ctx, w, h) => {
+        ctx.fillStyle = '#1d120d'; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 2200; i++) {
+          ctx.fillStyle = Math.random() > 0.4 ? 'rgba(65, 42, 28, 0.75)' : 'rgba(8, 6, 4, 0.9)';
+          ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 2 + 0.5, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function generateCrateTexture() {
+      const canvas = createProceduralCanvas(256, 256, (ctx, w, h) => {
+        ctx.fillStyle = '#9c6634'; ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#5a3517'; ctx.lineWidth = 14;
+        ctx.strokeRect(7, 7, w - 14, h - 14);
+        ctx.lineWidth = 10; ctx.beginPath();
+        ctx.moveTo(12, 12); ctx.lineTo(w - 12, h - 12);
+        ctx.moveTo(w - 12, 12); ctx.lineTo(12, h - 12);
+        ctx.stroke();
+      });
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function initScene() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x08090d);
+      scene.fog = new THREE.FogExp2(0x08090d, 0.04);
+
+      camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+      updateCameraPositionImmediate();
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      
+      // XR Enablement
+      renderer.xr.enabled = true;
+      document.body.appendChild( VRButton.createButton( renderer ) );
+
+      container.appendChild(renderer.domElement);
+
+      raycaster = new THREE.Raycaster();
+      mouseNorm = new THREE.Vector2(0, 0);
+
+      setupEnvironment();
+      setupLighting();
+      buildPyramidTower();
+      spawnReadyPot();
+
+      window.addEventListener('resize', onResize);
+      setupInputControllers(); // For Desktop/Mobile fallback
+      setupXRControllers();    // For Meta Quest / WebXR
+    }
+
+    function setupEnvironment() {
+      // Wall
+      const wallMat = new THREE.MeshStandardMaterial({ map: generateWallTexture(), roughness: 0.82 });
+      const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(26, 18), wallMat);
+      wallMesh.position.set(0, 4.0, ARENA.wallZ);
+      wallMesh.receiveShadow = true;
+      scene.add(wallMesh);
+
+      // Floor
+      const floorMat = new THREE.MeshStandardMaterial({ map: generateFloorTexture(), roughness: 0.38 });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(28, 40), floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set(0, ARENA.floorY, 0);
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // VR Target Mark on Wall
+      wallAimPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -ARENA.wallZ);
+      const targetMat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.2, wireframe: true });
+      const targetMesh = new THREE.Mesh(new THREE.CircleGeometry(0.8, 32), targetMat);
+      targetMesh.position.set(0, 1.2, ARENA.wallZ + 0.02);
+      scene.add(targetMesh);
+
+      // Pedestal for the ready pot
+      const pedestalGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.9, 32);
+      const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x181a1f, roughness: 0.6, metalness: 0.3 });
+      const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
+      pedestal.position.set(ARENA.readyPos.x, ARENA.floorY + 0.45, ARENA.readyPos.z);
+      pedestal.castShadow = true;
+      pedestal.receiveShadow = true;
+      scene.add(pedestal);
+    }
+
+    function setupLighting() {
+      scene.add(new THREE.AmbientLight(0xd5e3f5, 0.45));
+      const mainSpot = new THREE.SpotLight(0xfff1e0, 2.4);
+      mainSpot.position.set(1.5, 4.5, 2.0);
+      mainSpot.target.position.set(0, 1.0, -3.0);
+      mainSpot.angle = Math.PI / 3;
+      mainSpot.castShadow = true;
+      mainSpot.shadow.mapSize.width = 1024;
+      mainSpot.shadow.mapSize.height = 1024;
+      scene.add(mainSpot);
+      scene.add(mainSpot.target);
+      const warmLight = new THREE.PointLight(0xff8833, 0.8, 8);
+      warmLight.position.set(0.2, 1.2, 0.5);
+      scene.add(warmLight);
+    }
+
+    function buildPotModel(type = 'terracotta') {
+      const group = new THREE.Group();
+      let bodyMat, typeScale = 1.0;
+
+      if (type === 'glazed') bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a727d, roughness: 0.12 });
+      else if (type === 'porcelain') bodyMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f8, roughness: 0.22 });
+      else if (type === 'concrete') bodyMat = new THREE.MeshStandardMaterial({ color: 0x484c54, roughness: 0.95 });
+      else if (type === 'dynamite') bodyMat = new THREE.MeshStandardMaterial({ color: 0xd91e18, roughness: 0.35 });
+      else if (type === 'crystal') bodyMat = new THREE.MeshStandardMaterial({ color: 0x88e7ff, transparent: true, opacity: 0.82, roughness: 0.05 });
+      else if (type === 'magma') { typeScale = 1.3; bodyMat = new THREE.MeshStandardMaterial({ color: 0x331100, emissive: 0xff3300, emissiveIntensity: 0.5, roughness: 0.8 }); }
+      else bodyMat = new THREE.MeshStandardMaterial({ map: generateClayTexture(), roughness: 0.85 });
+
+      const potH = 1.0 * typeScale * XR_SCALE;
+      const bR = 0.42 * typeScale * XR_SCALE;
+      const tR = 0.62 * typeScale * XR_SCALE;
+      const rimR = 0.68 * typeScale * XR_SCALE;
+
+      const pts = [
+        new THREE.Vector2(bR * 0.8, 0.0), new THREE.Vector2(bR, 0.05),
+        new THREE.Vector2(bR * 1.05, 0.3 * potH), new THREE.Vector2(tR * 0.96, potH * 0.86),
+        new THREE.Vector2(rimR, potH * 0.92), new THREE.Vector2(rimR, potH),
+        new THREE.Vector2(rimR * 0.91, potH), new THREE.Vector2(tR * 0.85, potH * 0.86),
+        new THREE.Vector2(0.05, 0.1)
+      ];
+      const potGeo = new THREE.LatheGeometry(pts, 24);
+      const bodyMesh = new THREE.Mesh(potGeo, bodyMat);
+      bodyMesh.castShadow = true;
+      group.add(bodyMesh);
+
+      const soilMat = new THREE.MeshStandardMaterial({ map: generateSoilTexture(), roughness: 0.96 });
+      const soilGeo = new THREE.CylinderGeometry(tR * 0.85, tR * 0.76, 0.1 * typeScale, 20);
+      const soilMesh = new THREE.Mesh(soilGeo, soilMat);
+      soilMesh.position.y = potH * 0.82;
+      group.add(soilMesh);
+
+      const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ea048, roughness: 0.4, side: THREE.DoubleSide });
+      const leafGeo = new THREE.PlaneGeometry(0.3 * XR_SCALE, 0.6 * XR_SCALE);
+      for (let i = 0; i < 6; i++) {
+        const leaf = new THREE.Mesh(leafGeo, leafMat);
+        leaf.position.set((Math.random()-0.5)*tR, potH*0.9 + Math.random()*0.1, (Math.random()-0.5)*tR);
+        leaf.rotation.set(Math.random()*0.5, Math.random()*Math.PI*2, 0);
+        group.add(leaf);
+      }
+
+      return { group, bodyMat, soilMat, leafMat, potType: type, scaleMult: typeScale };
+    }
+
+    function spawnReadyPot() {
+      if (readyPot && readyPot.mesh) return readyPot;
+      const potData = buildPotModel(activePotType);
+      
+      readyPot = {
+        mesh: potData.group,
+        bodyMat: potData.bodyMat,
+        soilMat: potData.soilMat,
+        leafMat: potData.leafMat,
+        potType: potData.potType,
+        scaleMult: potData.scaleMult || 1.0,
+        initialPos: new THREE.Vector3().copy(ARENA.readyPos),
+        isGrabbed: false,
+        spawnProgress: 0
+      };
+
+      readyPot.mesh.position.copy(readyPot.initialPos);
+      readyPot.mesh.rotation.y = Math.random() * Math.PI;
+      readyPot.mesh.scale.set(0.1, 0.1, 0.1);
+      scene.add(readyPot.mesh);
+      return readyPot;
+    }
+
+    function buildPyramidTower() {
+      towerBlocks.forEach(b => scene.remove(b.mesh));
+      towerBlocks = [];
+      if (!crateTexture) crateTexture = generateCrateTexture();
+      const crateMat = new THREE.MeshStandardMaterial({ map: crateTexture, roughness: 0.75 });
+
+      const bW = 0.35, bH = 0.28, bD = 0.35; // VR Scale
+      const crateGeo = new THREE.BoxGeometry(bW, bH, bD);
+      const baseZ = -3.5;
+      const startY = ARENA.floorY + bH * 0.5;
+      const levels = 5;
+
+      for (let lvl = 0; lvl < levels; lvl++) {
+        const countInRow = levels - lvl;
+        const startX = -(countInRow * bW) / 2 + bW / 2;
+        const yPos = startY + lvl * bH;
+        for (let c = 0; c < countInRow; c++) {
+          const blockMesh = new THREE.Mesh(crateGeo, crateMat);
+          blockMesh.position.set(startX + c * bW, yPos, baseZ);
+          blockMesh.castShadow = true;
+          scene.add(blockMesh);
+          towerBlocks.push({
+            mesh: blockMesh, size: new THREE.Vector3(bW, bH, bD), radius: Math.hypot(bW, bH, bD) * 0.5,
+            vel: new THREE.Vector3(), angVel: new THREE.Vector3(), isHit: false, isResting: false
+          });
+        }
+      }
+    }
+
+    function setupXRControllers() {
+      for (let i = 0; i < 2; i++) {
+        const controller = renderer.xr.getController(i);
+        scene.add(controller);
+
+        // Visual hand/pointer representation
+        const handGeo = new THREE.DodecahedronGeometry(0.04, 0);
+        const handMat = new THREE.MeshStandardMaterial({color: i===0?0xef4444:0x3b82f6, roughness: 0.4, wireframe: true});
+        const handMesh = new THREE.Mesh(handGeo, handMat);
+        controller.add(handMesh);
+
+        controller.userData.prevPositions = [];
+        controller.userData.velocity = new THREE.Vector3();
+        controller.userData.grabbedPot = null;
+
+        // Trigger (Index finger) for Grabbing
+        controller.addEventListener('selectstart', onXRSelectStart);
+        controller.addEventListener('selectend', onXRSelectEnd);
+
+        // Grip (Middle finger) for Utilities
+        controller.addEventListener('squeezestart', (e) => {
+          if (i === 1) { // Right Grip = Change Pot Type
+            let nextIdx = (potTypeArray.indexOf(activePotType) + 1) % potTypeArray.length;
+            setPotType(potTypeArray[nextIdx]);
+          } else { // Left Grip = Reset Room
+            resetTower();
+            clearRoom();
+          }
+        });
+
+        xrControllers.push(controller);
+      }
+    }
+
+    function onXRSelectStart(event) {
+      const controller = event.target;
+      if (readyPot && !readyPot.isGrabbed) {
+        const ctrlPos = new THREE.Vector3();
+        controller.getWorldPosition(ctrlPos);
+        const potPos = new THREE.Vector3();
+        readyPot.mesh.getWorldPosition(potPos);
+
+        if (ctrlPos.distanceTo(potPos) < 0.25) { // 25cm grab range
+          readyPot.isGrabbed = true;
+          controller.userData.grabbedPot = readyPot;
+          // Attach to controller to move with hand natively
+          controller.attach(readyPot.mesh);
+          playAuthenticImpactAudio(0.1); // Small click sound
+          hideGuide();
+        }
+      }
+    }
+
+    function onXRSelectEnd(event) {
+      const controller = event.target;
+      if (controller.userData.grabbedPot) {
+        const pot = controller.userData.grabbedPot;
+        pot.isGrabbed = false;
+        controller.userData.grabbedPot = null;
+
+        // Detach and return to scene world space
+        scene.attach(pot.mesh);
+
+        // Throw Velocity Calculation
+        const vel = controller.userData.velocity.clone().multiplyScalar(1.2); 
+        if (vel.lengthSq() < 0.5) {
+          // Dropped, gently fall
+          vel.set(0, 0, 0);
+        }
+
+        flyingPots.push({
+          mesh: pot.mesh,
+          bodyMat: pot.bodyMat, soilMat: pot.soilMat, leafMat: pot.leafMat,
+          potType: pot.potType || activePotType,
+          velocity: vel,
+          angularVel: new THREE.Vector3((Math.random() - 0.5)*15, (Math.random() - 0.5)*15, (Math.random() - 0.5)*15),
+          trailTimer: 0
+        });
+
+        readyPot = null;
+        playThrowWhooshAudio(vel.length() / 8.0);
+        scheduleAutoRespawn(500);
+      }
+    }
+
+    function trackControllerVelocities() {
+      xrControllers.forEach(c => {
+        const pos = new THREE.Vector3();
+        c.getWorldPosition(pos);
+        
+        c.userData.prevPositions.push({ pos: pos.clone(), time: performance.now() });
+        if (c.userData.prevPositions.length > 6) c.userData.prevPositions.shift();
+        
+        if (c.userData.prevPositions.length >= 2) {
+          const oldest = c.userData.prevPositions[0];
+          const newest = c.userData.prevPositions[c.userData.prevPositions.length - 1];
+          const dt = (newest.time - oldest.time) / 1000;
+          if (dt > 0) {
+            c.userData.velocity.copy(newest.pos).sub(oldest.pos).divideScalar(dt);
+          }
+        }
+      });
+    }
+
+    function setupInputControllers() {
+      const container = document.getElementById('canvas-container');
+      container.addEventListener('pointerdown', (e) => {
+        if (readyPot && readyPot.isGrabbed) return; // Yield to VR
+        isPointerDown = true;
+        pointerDownPos = { x: e.clientX, y: e.clientY, time: performance.now() };
+        dragCurrent = { x: e.clientX, y: e.clientY, time: pointerDownPos.time };
+        dragHistory = [pointerDownPos];
+        hideGuide();
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (!isPointerDown) return;
+        dragCurrent = { x: e.clientX, y: e.clientY, time: performance.now() };
+        dragHistory.push(dragCurrent);
+        if (dragHistory.length > 8) dragHistory.shift();
+        if (readyPot && readyPot.mesh) {
+          const dx = dragCurrent.x - pointerDownPos.x;
+          const dy = dragCurrent.y - pointerDownPos.y;
+          readyPot.mesh.position.x = readyPot.initialPos.x + (dx / window.innerWidth) * 0.5;
+          readyPot.mesh.position.y = readyPot.initialPos.y - (dy / window.innerHeight) * 0.5;
+        }
+      });
+      window.addEventListener('pointerup', (e) => {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        if (performance.now() - lastThrowTime < 130) return;
+        
+        const dx = dragCurrent.x - pointerDownPos.x;
+        const dy = dragCurrent.y - pointerDownPos.y;
+        
+        // Simple screen space to world target
+        mouseNorm.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouseNorm.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouseNorm, camera);
+        const hitPoint = new THREE.Vector3();
+        raycaster.ray.intersectPlane(wallAimPlane, hitPoint);
+        if (!hitPoint) return;
+
+        // Apply drag bias
+        hitPoint.x += (dx / window.innerWidth) * 5.0;
+        hitPoint.y += (-dy / window.innerHeight) * 5.0;
+
+        launchPotToTarget(hitPoint, 0.45);
+      });
+    }
+
+    function launchPotToTarget(targetPoint, duration) {
+      if (!readyPot || !readyPot.mesh) readyPot = spawnReadyPot();
+      const p0 = readyPot.mesh.position.clone();
+      const t = Math.max(0.24, duration);
+      const vx = (targetPoint.x - p0.x) / t;
+      const vz = (targetPoint.z - p0.z) / t;
+      const vy = (targetPoint.y - p0.y - 0.5 * -9.8 * t * t) / t;
+
+      flyingPots.push({
+        mesh: readyPot.mesh,
+        bodyMat: readyPot.bodyMat, soilMat: readyPot.soilMat, leafMat: readyPot.leafMat,
+        potType: readyPot.potType,
+        velocity: new THREE.Vector3(vx, vy, vz),
+        angularVel: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15, -vx),
+        trailTimer: 0
+      });
+
+      readyPot = null;
+      playThrowWhooshAudio(Math.abs(vz) / 10.0);
+      scheduleAutoRespawn(300);
+    }
+
+    function shatterPot(flyingObj) {
+      const impactPos = flyingObj.mesh.position.clone();
+      const impactVel = flyingObj.velocity.clone();
+      const hitSpeed = impactVel.length();
+      const pType = flyingObj.potType;
+
+      scene.remove(flyingObj.mesh);
+      analytics.smashes++;
+      document.getElementById('stat-smashes').innerText = analytics.smashes;
+
+      if (pType === 'dynamite') {
+        hitStopTimer = 0.08; cameraShake = 0.8;
+        playExplosionAudio(); spawnShockwave(impactPos, new THREE.Vector3(0,0,1), 0xff3300, 6.0);
+        towerBlocks.forEach(tb => {
+          const d = tb.mesh.position.distanceTo(impactPos);
+          if (d < 3.0) {
+            tb.isHit = true; tb.isResting = false;
+            tb.vel.addScaledVector(tb.mesh.position.clone().sub(impactPos).normalize(), (3.0-d)*6);
+            tb.vel.y += 3.0;
+          }
+        });
+      } else if (pType === 'crystal') {
+        playCrystalShatterAudio(); spawnShockwave(impactPos, new THREE.Vector3(0,0,1), 0x77eeff, 4.0);
+      } else {
+        playAuthenticImpactAudio(hitSpeed / 8); spawnShockwave(impactPos, new THREE.Vector3(0,0,1), 0xff9533, 3.5);
+      }
+
+      // Shards generation (simplified for performance in VR)
+      const count = pType === 'crystal' ? 40 : 15;
+      for (let i = 0; i < count; i++) {
+        const sSize = (0.04 + Math.random() * 0.05) * (pType==='magma'?1.5:1);
+        const shardMesh = new THREE.Mesh(new THREE.ConeGeometry(sSize, sSize * 1.5, 3), flyingObj.bodyMat);
+        shardMesh.position.copy(impactPos).add(new THREE.Vector3((Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2, (Math.random()-0.5)*0.1));
+        shards.push({
+          mesh: shardMesh,
+          vel: new THREE.Vector3((Math.random()-0.5)*4, Math.random()*3+1, Math.abs(impactVel.z)*0.2),
+          angVel: new THREE.Vector3((Math.random()-0.5)*20, (Math.random()-0.5)*20, 0),
+          radius: sSize, isResting: false
+        });
+        scene.add(shardMesh);
+      }
+    }
+
+    function spawnShockwave(pos, normal, color, maxR) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.1, 0.25, 32),
+        new THREE.MeshBasicMaterial({color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false})
+      );
+      ring.position.copy(pos).addScaledVector(normal, 0.05);
+      scene.add(ring);
+      shockwaves.push({ mesh: ring, radius: 0.1, maxRadius: maxR, expandSpeed: 8.0, opacity: 0.8 });
+    }
+
+    function stepPhysics(delta) {
+      if (hitStopTimer > 0) {
+        hitStopTimer -= delta;
+        return;
+      }
+
+      const effDt = Math.min(delta, 0.05) * timeScale;
+      const GRAVITY = -9.8;
+
+      if (readyPot && readyPot.mesh && !readyPot.isGrabbed && readyPot.spawnProgress < 1.0) {
+        readyPot.spawnProgress = Math.min(1.0, readyPot.spawnProgress + effDt * 5.0);
+        const s = Math.sin(readyPot.spawnProgress * Math.PI * 0.5) * 1.0;
+        readyPot.mesh.scale.set(s, s, s);
+      }
+
+      for (let p = flyingPots.length - 1; p >= 0; p--) {
+        const fp = flyingPots[p];
+        fp.velocity.y += GRAVITY * effDt;
+        fp.mesh.position.addScaledVector(fp.velocity, effDt);
+        fp.mesh.rotation.x += fp.angularVel.x * effDt;
+        fp.mesh.rotation.y += fp.angularVel.y * effDt;
+
+        let hitTower = false;
+        for (let tb of towerBlocks) {
+          if (fp.mesh.position.distanceTo(tb.mesh.position) < tb.radius + 0.15) {
+            hitTower = true; tb.isHit = true; tb.isResting = false;
+            tb.vel.copy(fp.velocity).multiplyScalar(0.5).add(new THREE.Vector3(0, 2, 0));
+            playBlockCrashAudio(fp.velocity.length() / 8.0);
+            shatterPot(fp); flyingPots.splice(p, 1);
+            break;
+          }
+        }
+        if (hitTower) continue;
+
+        if (fp.mesh.position.z <= ARENA.wallZ + 0.2 || fp.mesh.position.y <= ARENA.floorY + 0.1 || Math.abs(fp.mesh.position.x) >= ARENA.sideX) {
+          shatterPot(fp); flyingPots.splice(p, 1);
+        }
+      }
+
+      // Physics for Shards & Blocks
+      shards.forEach(s => {
+        if(s.isResting) return;
+        s.vel.y += GRAVITY * effDt; s.mesh.position.addScaledVector(s.vel, effDt);
+        s.mesh.rotation.x += s.angVel.x * effDt; s.mesh.rotation.y += s.angVel.y * effDt;
+        if(s.mesh.position.y <= ARENA.floorY + s.radius) {
+          s.mesh.position.y = ARENA.floorY + s.radius; s.vel.y *= -0.2; s.vel.x *= 0.8; s.vel.z *= 0.8;
+          if(s.vel.lengthSq() < 0.1) s.isResting = true;
+        }
+      });
+
+      towerBlocks.forEach(tb => {
+        if(!tb.isHit || tb.isResting) return;
+        tb.vel.y += GRAVITY * effDt; tb.mesh.position.addScaledVector(tb.vel, effDt);
+        tb.mesh.rotation.x += tb.angVel.x * effDt; tb.mesh.rotation.y += tb.angVel.y * effDt;
+        if(tb.mesh.position.y <= ARENA.floorY + tb.size.y*0.5) {
+          tb.mesh.position.y = ARENA.floorY + tb.size.y*0.5; tb.vel.y *= -0.3; tb.vel.x *= 0.8; tb.vel.z *= 0.8;
+          if(tb.vel.lengthSq() < 0.1) tb.isResting = true;
+        }
+      });
+
+      for (let sw = shockwaves.length - 1; sw >= 0; sw--) {
+        const wave = shockwaves[sw];
+        wave.radius += wave.expandSpeed * effDt;
+        wave.mesh.scale.set(wave.radius, wave.radius, 1);
+        wave.opacity -= 1.5 * effDt;
+        wave.mesh.material.opacity = Math.max(0, wave.opacity);
+        if (wave.opacity <= 0) { scene.remove(wave.mesh); shockwaves.splice(sw, 1); }
+      }
+
+      if (cameraShake > 0.001 && !renderer.xr.isPresenting) {
+        cameraOffset.set((Math.random()-0.5)*cameraShake, (Math.random()-0.5)*cameraShake, 0);
+        cameraShake *= Math.pow(0.05, effDt);
+        camera.position.copy(baseCameraPos).add(cameraOffset);
+      }
+    }
+
+    function animateFrame() {
+      const now = performance.now();
+      const dt = (now - lastTimestamp) / 1000;
+      lastTimestamp = now;
+
+      if (renderer.xr.isPresenting) trackControllerVelocities();
+      stepPhysics(dt);
+      renderer.render(scene, camera);
+    }
+
+    // UI Helpers
+    function setPotType(type) {
+      activePotType = type;
+      document.querySelectorAll('.pot-type-btn').forEach(b => b.classList.replace('text-white', 'text-slate-300'));
+      const act = document.getElementById(`type-${type}`);
+      if(act) { act.classList.replace('text-slate-300', 'text-white'); act.classList.add('bg-gradient-to-r', 'from-orange-600', 'to-amber-600'); }
+      respawnReadyPot();
+    }
+    function resetTower() { buildPyramidTower(); showToast('タワー再構築'); }
+    function respawnReadyPot() {
+      if (readyPot && readyPot.mesh && !readyPot.isGrabbed) { scene.remove(readyPot.mesh); readyPot = null; }
+      spawnReadyPot();
+    }
+    function scheduleAutoRespawn(ms) { clearTimeout(autoRespawnTimeout); autoRespawnTimeout = setTimeout(spawnReadyPot, ms); }
+    function clearRoom() { shards.forEach(s=>scene.remove(s.mesh)); shards=[]; resetTower(); }
+    function showToast(msg) {
+      const t = document.getElementById('toast-notify'); t.innerText = msg; t.style.opacity = '1';
+      clearTimeout(t.timer); t.timer = setTimeout(()=>t.style.opacity='0', 2000);
+    }
+    function hideGuide() { const g = document.getElementById('guide-modal'); if(g) g.style.opacity = '0'; }
+    function cycleCameraView() {
+      if(renderer.xr.isPresenting) return showToast("VR中はカメラ変更不可");
+      cameraMode = (cameraMode + 1) % cameraConfigs.length;
+      baseCameraPos.copy(cameraConfigs[cameraMode].pos);
+      camera.position.copy(baseCameraPos);
+      camera.lookAt(cameraConfigs[cameraMode].target);
+    }
+
+    function onResize() {
+      const c = document.getElementById('canvas-container');
+      camera.aspect = c.clientWidth / c.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(c.clientWidth, c.clientHeight);
+    }
+
+    window.onload = function() {
+      initScene();
+      renderer.setAnimationLoop(animateFrame);
+    };
+  </script>
+</body>
+</html>
